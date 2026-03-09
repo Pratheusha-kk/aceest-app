@@ -16,7 +16,7 @@ pipeline {
     // Jenkins Global Tool Configuration name for SonarScanner (case-sensitive).
     // Set this to the exact tool name configured in: Manage Jenkins -> Global Tool Configuration.
     // If you don't have a tool configured, the pipeline will fall back to `sonar-scanner` on PATH.
-    SONAR_SCANNER_TOOL = "sonar-scanner"
+    SONAR_SCANNER_TOOL = "sonar"
   }
 
   stages {
