@@ -8,6 +8,10 @@ pipeline {
   environment {
     IMAGE_NAME = "aceest-app"
     IMAGE_TAG  = "aceest-${BUILD_NUMBER}"
+
+    // Jenkins Global Tool Configuration name for SonarScanner
+    // Change this to match your Jenkins tool name if different.
+    SONAR_SCANNER_TOOL = "sonar-scanner"
   }
 
   stages {
@@ -37,8 +41,17 @@ pipeline {
             set -euxo pipefail
 
             # Use SonarScanner installed/configured in Jenkins Global Tool Configuration
-            SCANNER_HOME=$(tool 'sonar-scanner')
-            ${SCANNER_HOME}/bin/sonar-scanner
+            SCANNER_HOME="$(tool "${SONAR_SCANNER_TOOL}")"
+
+            if [ ! -x "${SCANNER_HOME}/bin/sonar-scanner" ]; then
+              echo "ERROR: SonarScanner not found at ${SCANNER_HOME}/bin/sonar-scanner"
+              echo "Check Jenkins -> Manage Jenkins -> Global Tool Configuration."
+              echo "Set SONAR_SCANNER_TOOL in Jenkinsfile to the configured tool name."
+              exit 2
+            fi
+
+            "${SCANNER_HOME}/bin/sonar-scanner" --version
+            "${SCANNER_HOME}/bin/sonar-scanner"
           '''
         }
       }
