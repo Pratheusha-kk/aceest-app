@@ -8,6 +8,14 @@ pipeline {
   environment {
     IMAGE_NAME = "aceest-app"
     IMAGE_TAG  = "aceest-${BUILD_NUMBER}"
+
+    // Jenkins "Configure System" -> SonarQube servers -> Name
+    // Must match exactly, otherwise withSonarQubeEnv() fails.
+    SONARQUBE_SERVER = "LocalSonar"
+
+    // SonarScanner CLI must be available on the Jenkins agent.
+    // Either install it so `sonar-scanner` is on PATH, or configure it in Jenkins tools and adjust pipeline accordingly.
+    SONAR_SCANNER_TOOL = "sonar-scanner"
   }
 
   stages {
@@ -16,7 +24,18 @@ pipeline {
         checkout scm
       }
     }
-
+    stage('SonarQube: Static Analysis') {
+      steps {
+          sh '''
+            set -euxo pipefail
+            export PATH="/opt:$PATH"
+            sonar --version
+            sonar install secrets
+            ls -al
+            sonar analyze --file sonar-project.properties
+          '''
+      }
+    }
     stage('Python: Unit Tests (PyUnit)') {
       steps {
         sh '''
@@ -30,19 +49,6 @@ pipeline {
       }
     }
 
-    stage('SonarQube: Static Analysis') {
-      steps {
-        withSonarQubeEnv('SonarQube') {
-          sh '''
-            set -euxo pipefail
-
-            # Use SonarScanner installed/configured in Jenkins Global Tool Configuration
-            SCANNER_HOME=$(tool 'sonar-scanner')
-            ${SCANNER_HOME}/bin/sonar-scanner
-          '''
-        }
-      }
-    }
 
     stage('Docker: Build Image') {
       steps {
