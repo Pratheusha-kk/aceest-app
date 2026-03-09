@@ -25,7 +25,6 @@ pipeline {
         git pull
       }
     }
-
     stage('SonarQube: Static Analysis') {
       steps {
         withSonarQubeEnv("${SONARQUBE_SERVER}") {
@@ -35,7 +34,6 @@ pipeline {
         }
       }
     }
-
     stage('Python: Unit Tests (PyUnit)') {
       steps {
         sh '''
