@@ -28,9 +28,10 @@ pipeline {
       steps {
         withSonarQubeEnv("${SONARQUBE_SERVER}") {
           sh '''
+            set -euxo pipefail
             export PATH="/opt:$PATH"
             sonar --version
-            sonar analyze
+            sonar analyze --file sonar-project.properties
           '''
         }
       }
