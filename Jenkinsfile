@@ -26,14 +26,12 @@ pipeline {
     }
     stage('SonarQube: Static Analysis') {
       steps {
-        withSonarQubeEnv("${SONARQUBE_SERVER}") {
           sh '''
             set -euxo pipefail
             export PATH="/opt:$PATH"
             sonar --version
             sonar analyze --file sonar-project.properties
           '''
-        }
       }
     }
     stage('Python: Unit Tests (PyUnit)') {
