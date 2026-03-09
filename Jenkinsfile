@@ -26,26 +26,30 @@ pipeline {
     }
     stage('SonarQube: Static Analysis') {
       steps {
-        withSonarQubeEnv("${SONARQUBE_SERVER}") {
-          sh '''
-            set -euxo pipefail
+        script {
+          // Resolve SonarScanner from Jenkins Global Tool Configuration (Groovy step, not a shell command)
+          def scannerHome = tool(env.SONAR_SCANNER_TOOL)
 
-            # Resolve SonarScanner from Jenkins Global Tool Configuration
-            SCANNER_HOME="$(tool "${SONAR_SCANNER_TOOL}")"
+          withSonarQubeEnv("${SONARQUBE_SERVER}") {
+            withEnv(["SCANNER_HOME=${scannerHome}"]) {
+              sh '''
+                set -euxo pipefail
 
-            echo "Resolved SonarScanner tool home: ${SCANNER_HOME}"
-            ls -la "${SCANNER_HOME}/bin" || true
+                echo "Resolved SonarScanner tool home: ${SCANNER_HOME}"
+                ls -la "${SCANNER_HOME}/bin" || true
 
-            if [ ! -x "${SCANNER_HOME}/bin/sonar-scanner" ]; then
-              echo "ERROR: SonarScanner not found at ${SCANNER_HOME}/bin/sonar-scanner"
-              echo "Fix: Jenkins -> Manage Jenkins -> Global Tool Configuration -> SonarScanner"
-              echo "Then set SONAR_SCANNER_TOOL in Jenkinsfile to that exact tool name."
-              exit 2
-            fi
+                if [ ! -x "${SCANNER_HOME}/bin/sonar-scanner" ]; then
+                  echo "ERROR: SonarScanner not found at ${SCANNER_HOME}/bin/sonar-scanner"
+                  echo "Fix: Jenkins -> Manage Jenkins -> Global Tool Configuration -> SonarScanner"
+                  echo "Then set SONAR_SCANNER_TOOL in Jenkinsfile to that exact tool name."
+                  exit 2
+                fi
 
-            "${SCANNER_HOME}/bin/sonar-scanner" --version
-            "${SCANNER_HOME}/bin/sonar-scanner"
-          '''
+                "${SCANNER_HOME}/bin/sonar-scanner" --version
+                "${SCANNER_HOME}/bin/sonar-scanner"
+              '''
+            }
+          }
         }
       }
     }
