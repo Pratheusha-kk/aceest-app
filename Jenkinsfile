@@ -9,6 +9,10 @@ pipeline {
     IMAGE_NAME = "aceest-app"
     IMAGE_TAG  = "aceest-${BUILD_NUMBER}"
 
+    // Jenkins "Configure System" -> SonarQube servers -> Name
+    // Must match exactly, otherwise withSonarQubeEnv() fails.
+    SONARQUBE_SERVER = "sonarqube"
+
     // Jenkins Global Tool Configuration name for SonarScanner
     // Change this to match your Jenkins tool name if different.
     SONAR_SCANNER_TOOL = "sonar-scanner"
@@ -36,7 +40,7 @@ pipeline {
 
     stage('SonarQube: Static Analysis') {
       steps {
-        withSonarQubeEnv('SonarQube') {
+        withSonarQubeEnv("${SONARQUBE_SERVER}") {
           sh '''
             set -euxo pipefail
 
