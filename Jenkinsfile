@@ -97,8 +97,12 @@ pipeline {
         sh '''
           set -euxo pipefail
 
-          # Run container in background
-          CID=$(docker run -d -p 5000:5000 ${IMAGE_NAME}:${IMAGE_TAG})
+          # Run container in background using the branch-latest tag created in the build stage
+          BRANCH_RAW="${BRANCH_NAME:-unknown}"
+          BRANCH_SAFE="$(echo "$BRANCH_RAW" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9_.-]+#-#g')"
+          BRANCH_LATEST_TAG="${BRANCH_SAFE}-latest"
+
+          CID=$(docker run -d -p 5000:5000 ${IMAGE_NAME}:${BRANCH_LATEST_TAG})
 
           # Give the app time to start
           sleep 3
