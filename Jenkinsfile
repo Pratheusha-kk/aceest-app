@@ -28,9 +28,6 @@ pipeline {
       steps {
         withSonarQubeEnv("${SONARQUBE_SERVER}") {
           sh '''
-            set -euxo pipefail
-
-            command -v sonar
             sonar --version
             sonar analyse
           '''
