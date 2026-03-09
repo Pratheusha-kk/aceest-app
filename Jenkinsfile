@@ -5,6 +5,10 @@ pipeline {
     timestamps()
   }
 
+  parameters {
+    string(name: 'RELEASE_VERSION', defaultValue: '', description: 'Optional Docker version tag (e.g., 1.0, 1.1). Leave empty for normal builds.')
+  }
+
   environment {
     IMAGE_NAME = "aceest-app"
     IMAGE_TAG  = "aceest-${BUILD_NUMBER}"
@@ -55,8 +59,35 @@ pipeline {
       steps {
         sh '''
           set -euxo pipefail
-          docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
-          docker image ls ${IMAGE_NAME}:${IMAGE_TAG}
+
+          # Derive a safe branch name for docker tags
+          BRANCH_RAW="${BRANCH_NAME:-unknown}"
+          BRANCH_SAFE="$(echo "$BRANCH_RAW" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9_.-]+#-#g')"
+
+          # Short git SHA for traceability
+          GIT_SHA="$(git rev-parse --short=8 HEAD 2>/dev/null || echo nogit)"
+
+          # Tag set:
+          # 1) immutable tag for every build: <branch>-<build>-<sha>
+          # 2) moving tag for convenience:      <branch>-latest
+          IMMUTABLE_TAG="${BRANCH_SAFE}-${BUILD_NUMBER}-${GIT_SHA}"
+          BRANCH_LATEST_TAG="${BRANCH_SAFE}-latest"
+
+          echo "Building image with tags:"
+          echo " - ${IMAGE_NAME}:${IMMUTABLE_TAG}"
+          echo " - ${IMAGE_NAME}:${BRANCH_LATEST_TAG}"
+
+          docker build -t ${IMAGE_NAME}:${IMMUTABLE_TAG} .
+          docker tag ${IMAGE_NAME}:${IMMUTABLE_TAG} ${IMAGE_NAME}:${BRANCH_LATEST_TAG}
+
+          # Optional release tag (only when you pass RELEASE_VERSION)
+          if [ -n "${RELEASE_VERSION:-}" ]; then
+            RELEASE_TAG="v${RELEASE_VERSION}"
+            echo " - ${IMAGE_NAME}:${RELEASE_TAG}"
+            docker tag ${IMAGE_NAME}:${IMMUTABLE_TAG} ${IMAGE_NAME}:${RELEASE_TAG}
+          fi
+
+          docker image ls ${IMAGE_NAME} | head -n 20
         '''
       }
     }
