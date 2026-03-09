@@ -11,7 +11,7 @@ pipeline {
 
     // Jenkins "Configure System" -> SonarQube servers -> Name
     // Must match exactly, otherwise withSonarQubeEnv() fails.
-    SONARQUBE_SERVER = "sonarqube"
+    SONARQUBE_SERVER = "LocalSonar"
 
     // Jenkins Global Tool Configuration name for SonarScanner
     // Change this to match your Jenkins tool name if different.
