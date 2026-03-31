@@ -36,7 +36,7 @@ pipeline {
             # Only install secrets once, not every build
             sonar plugins list || sonar install secrets
             ls -al
-            sonar analyze --file sonar-project.properties
+            sonar analyze --file sonar-project.properties  | tee sonar-report.txt
           '''
       }
       post {
@@ -49,10 +49,12 @@ pipeline {
                         }
                     }
                     archiveArtifacts artifacts: 'sonar-report.json', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'sonar-report.txt', allowEmptyArchive: true
                 }
             }
     }
-    stage('Python: Unit Tests (PyUnit)') {
+    stage('Python: Unit Tests (PyTest)') 
+    {
       steps {
         sh '''
           set -euxo pipefail
@@ -60,10 +62,17 @@ pipeline {
           . .venv/bin/activate
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m unittest discover -s tests -p "test_*.py"
+          pip install pytest pytest-html
+
+          pytest tests --html=pytest-report.html --self-contained-html
         '''
       }
-    }
+      post {
+        always {
+          archiveArtifacts artifacts: 'pytest-report.html', allowEmptyArchive: true
+        }
+      }
+  }
 
     stage('UI Tests') {
       environment {
@@ -153,8 +162,13 @@ pipeline {
 
           # Run behave from the ui-tests directory, pointing to the app in the container
           cd ui-tests
-          BASE_URL="${UI_BASE_URL}" python -m behave
+          BASE_URL="${UI_BASE_URL}" python -m behave -f json -o cucumber-report.json
         '''
+      }
+        post {
+        always {
+          archiveArtifacts artifacts: 'ui-tests/cucumber-report.json', allowEmptyArchive: true
+        }
       }
     }
 
