@@ -51,6 +51,18 @@ pipeline {
           python -m unittest discover -s tests -p "test_*.py"
         '''
       }
+      post {
+                always {
+                    script {
+                        if (fileExists('sonar-report.json')) {
+                            sh 'cat sonar-report.json'
+                        } else {
+                            echo 'No sonar-report.json found'
+                        }
+                    }
+                    archiveArtifacts artifacts: 'sonar-report.json', allowEmptyArchive: true
+                }
+            }
     }
 
     stage('UI Tests') {
