@@ -53,8 +53,7 @@ pipeline {
                 }
             }
     }
-    stage('Python: Unit Tests (PyTest)') 
-    {
+    stage('Python: Unit Tests (PyUnit)') {
       steps {
         sh '''
           set -euxo pipefail
@@ -63,8 +62,7 @@ pipeline {
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           pip install pytest pytest-html
-
-          pytest tests --html=pytest-report.html --self-contained-html
+          PYTHONPATH="$WORKSPACE:$PYTHONPATH" pytest tests --html=pytest-report.html --self-contained-html
         '''
       }
       post {
@@ -72,7 +70,7 @@ pipeline {
           archiveArtifacts artifacts: 'pytest-report.html', allowEmptyArchive: true
         }
       }
-  }
+    }
 
     stage('UI Tests') {
       environment {
@@ -160,15 +158,11 @@ pipeline {
           # Install UI test requirements on the agent (includes behave, selenium, webdriver-manager, etc.)
           python -m pip install -r ui-tests/requirements.txt
 
-          # Run behave from the ui-tests directory, pointing to the app in the container
+          # Run behave from the ui-tests directory, pointing to the app in the container,
+          # and output a Cucumber JSON report
           cd ui-tests
           BASE_URL="${UI_BASE_URL}" python -m behave -f json -o cucumber-report.json
         '''
-      }
-        post {
-        always {
-          archiveArtifacts artifacts: 'ui-tests/cucumber-report.json', allowEmptyArchive: true
-        }
       }
     }
 
