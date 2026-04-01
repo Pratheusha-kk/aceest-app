@@ -62,7 +62,8 @@ pipeline {
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           pip install pytest pytest-html
-          PYTHONPATH="$WORKSPACE:$PYTHONPATH" pytest tests --html=pytest-report.html --self-contained-html
+          export PYTHONPATH="${WORKSPACE}:${PYTHONPATH:-}"
+          pytest tests --html=pytest-report.html --self-contained-html
         '''
       }
       post {
