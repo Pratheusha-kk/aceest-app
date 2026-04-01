@@ -165,6 +165,11 @@ pipeline {
           BASE_URL="${UI_BASE_URL}" python -m behave -f json -o cucumber-report.json
         '''
       }
+      post {
+        always {
+          archiveArtifacts artifacts: 'ui-tests/cucumber-report.json', allowEmptyArchive: true
+        }
+      }
     }
 
     stage('Docker: Build Image') {
