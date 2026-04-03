@@ -37,6 +37,8 @@ jobs:
       #     flake8 app.py tests || true
 
       - name: Run pytest
+        env:
+          PYTHONPATH: .
         run: |
           pytest -q
 
