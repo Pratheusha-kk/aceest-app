@@ -13,7 +13,7 @@ ACEest Fitness & Gym — a minimal Flask web **app + API** used as the base appl
 - **Dockerfile** for containerization
 - **Jenkinsfile** for CI/CD pipeline
 - **SonarQube** configuration (`sonar-project.properties`)
-- **GitHub Actions** workflow for automated build, test, and Docker image build (`.github/workflows/main.yml`)
+- **GitHub Actions** workflow for automated lint (flake8), tests (pytest), and Docker image build (`.github/workflows/main.yml`)
 
 ---
 
