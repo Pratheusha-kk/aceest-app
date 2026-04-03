@@ -169,6 +169,7 @@ pipeline {
         always {
           archiveArtifacts artifacts: 'ui-tests/cucumber-report.json', allowEmptyArchive: true
           archiveArtifacts artifacts: 'ui-tests/reports/ui-tests-report.html', allowEmptyArchive: true
+
         }
       }
     }
