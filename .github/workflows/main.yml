@@ -25,6 +25,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
+          python -m pip install pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       # Optional: basic lint step (can be commented out if you don't want it)
@@ -37,7 +38,7 @@ jobs:
 
       - name: Run pytest
         run: |
-          if [ -d tests ]; then pytest -q; else echo "No tests directory found"; fi
+          pytest -q
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
