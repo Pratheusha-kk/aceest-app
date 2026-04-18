@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aceest-app-primary
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: aceest-ab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aceest-app-a
+                port:
+                  number: 80

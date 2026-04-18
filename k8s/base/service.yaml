@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-app
+spec:
+  selector:
+    app: aceest-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5000

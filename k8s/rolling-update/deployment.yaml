@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-app
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: aceest-app
+      strategy: rolling-update
+  template:
+    metadata:
+      labels:
+        app: aceest-app
+        strategy: rolling-update
+    spec:
+      containers:
+        - name: aceest-app
+          image: aceest-app:latest
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: aceest-config
+          env:
+            - name: APP_VERSION
+              value: rolling-current
+            - name: IMAGE_TAG
+              value: rolling-current
+            - name: DEPLOYMENT_STRATEGY
+              value: rolling-update
+            - name: RELEASE_COLOR
+              value: green
+            - name: TRAFFIC_SEGMENT
+              value: all-users
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10

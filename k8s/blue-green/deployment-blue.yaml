@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-app-blue
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest-app
+      track: blue
+      strategy: blue-green
+  template:
+    metadata:
+      labels:
+        app: aceest-app
+        track: blue
+        strategy: blue-green
+    spec:
+      containers:
+        - name: aceest-app
+          image: aceest-app:latest
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: aceest-config
+          env:
+            - name: APP_VERSION
+              value: blue-stable
+            - name: IMAGE_TAG
+              value: blue-stable
+            - name: DEPLOYMENT_STRATEGY
+              value: blue-green
+            - name: RELEASE_COLOR
+              value: blue
+            - name: TRAFFIC_SEGMENT
+              value: production
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
