@@ -1,8 +1,7 @@
-from flask import Flask, jsonify, request, abort, render_template
+from flask import Flask, abort, jsonify, render_template, request
 
 app = Flask(__name__)
 
-# Program catalog (extended with workout + diet from Aceestver-1.1)
 PROGRAMS = {
     "Fat Loss (FL)": {
         "description": "Fat loss program",
@@ -25,8 +24,6 @@ PROGRAMS = {
     "Muscle Gain (MG)": {
         "description": "Muscle gain program",
         "workout": (
-            "Mon: Squat 5x5\n"
-
             "Mon: Squat 5x5\n"
             "Tue: Bench 5x5\n"
             "Wed: Deadlift 4x6\n"
@@ -63,6 +60,15 @@ PROGRAMS = {
 }
 
 
+def estimate_program_calories(program_name: str, weight_kg: float) -> dict:
+    return {
+        "program": program_name,
+        "weight_kg": weight_kg,
+        "calorie_factor": PROGRAMS[program_name]["calorie_factor"],
+        "calories_kcal": int(weight_kg * PROGRAMS[program_name]["calorie_factor"]),
+    }
+
+
 @app.route("/")
 def index():
     return jsonify({"message": "ACEest Fitness & Gym API is running"})
@@ -73,9 +79,6 @@ def health():
     return jsonify({"status": "healthy"}), 200
 
 
-# --------------------
-# Web GUI (HTML pages)
-# --------------------
 @app.route("/gui")
 def gui_home():
     return render_template("index.html")
@@ -107,26 +110,18 @@ def gui_calorie_estimator():
 
     if selected_program and weight_kg is not None:
         try:
-            # Reuse the same validation rules as the API.
             if selected_program not in PROGRAMS:
                 raise ValueError("Unknown program")
             if weight_kg <= 0:
                 raise ValueError("Weight must be > 0")
 
-            calories = int(weight_kg * PROGRAMS[selected_program]["calorie_factor"])
-            result = {
-                "program": selected_program,
-                "weight_kg": weight_kg,
-                "calorie_factor": PROGRAMS[selected_program]["calorie_factor"],
-                "calories_kcal": calories,
-            }
-        except Exception as e:
-            error = str(e)
+            result = estimate_program_calories(selected_program, weight_kg)
+        except ValueError as exc:
+            error = str(exc)
 
-    # Build option models in Python to avoid Jinja conditionals inside HTML attributes
-    # (some formatters break `{% if selected_program == name %}`).
     program_options = [
-        {"name": name, "selected": (name == selected_program)} for name in PROGRAMS.keys()
+        {"name": name, "selected": name == selected_program}
+        for name in PROGRAMS.keys()
     ]
 
     return render_template(
@@ -141,7 +136,6 @@ def gui_calorie_estimator():
 
 @app.route("/programs")
 def programs():
-    # Backwards compatible response: includes old fields plus new ones.
     return jsonify(PROGRAMS)
 
 
@@ -154,30 +148,21 @@ def program_detail(program_name: str):
 
 @app.route("/estimate-calories", methods=["GET"])
 def estimate_calories():
-    """
-    Query params:
-      - program: one of PROGRAMS keys
-      - weight_kg: number > 0
-    Response:
-      - calories_kcal: int
-    """
     program = request.args.get("program", type=str)
     weight_kg = request.args.get("weight_kg", type=float)
 
     if not program or program not in PROGRAMS:
-        abort(400, description="Query param 'program' is required and must be a known program")
+        abort(
+            400,
+            description="Query param 'program' is required and must be a known program",
+        )
     if weight_kg is None or weight_kg <= 0:
-        abort(400, description="Query param 'weight_kg' is required and must be > 0")
+        abort(
+            400,
+            description="Query param 'weight_kg' is required and must be > 0",
+        )
 
-    calories = int(weight_kg * PROGRAMS[program]["calorie_factor"])
-    return jsonify(
-        {
-            "program": program,
-            "weight_kg": weight_kg,
-            "calorie_factor": PROGRAMS[program]["calorie_factor"],
-            "calories_kcal": calories,
-        }
-    )
+    return jsonify(estimate_program_calories(program, weight_kg))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import os
 import signal
 import subprocess
+import sys
 import time
 import unittest
 
@@ -24,7 +25,7 @@ class AceestIntegrationTestCase(unittest.TestCase):
 
         # Start server process
         cls.proc = subprocess.Popen(
-            ["python", "app.py"],
+            [sys.executable, "app.py"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
