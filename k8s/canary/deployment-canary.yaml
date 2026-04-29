@@ -19,6 +19,7 @@ spec:
       containers:
         - name: aceest-app
           image: aceest-app:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 5000
           envFrom:

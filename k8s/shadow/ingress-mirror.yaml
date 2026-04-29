@@ -4,7 +4,7 @@ metadata:
   name: aceest-app-shadow
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/mirror-target: http://aceest-app-shadow
+    nginx.ingress.kubernetes.io/mirror-target: http://aceest-app-shadow.aceest.svc.cluster.local
 spec:
   ingressClassName: nginx
   rules:
