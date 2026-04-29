@@ -9,6 +9,11 @@ pipeline {
     IMAGE_NAME = "aceest-app"
     IMAGE_TAG  = "aceest-${BUILD_NUMBER}"
 
+    // Docker Hub namespace/user that owns the target repository.
+    // Example: if your image is docker.io/pratheushakk/aceest-app, use "pratheushakk".
+    DOCKERHUB_NAMESPACE = "pratheushakk"
+    DOCKERHUB_CRED_ID   = "dockerhub-credentials"
+
     // Semantic version for main branch deployments, e.g. v1, v2, ...
     VERSION_TAG = ""
 
@@ -205,48 +210,43 @@ pipeline {
       }
     }
 
-    stage('Docker: Push Image to Artifactory (Stage)') {
+    stage('Docker: Push Image to Docker Hub (Stage)') {
       when {
         expression {
-          // Push to stage repo for all non-main branches
+          // Push a stage/build tag for all non-main branches
           return env.BRANCH_NAME != 'main'
         }
-      }
-      environment {
-        ARTIFACTORY_REGISTRY   = 'trial5okz6u.jfrog.io' // Docker registry host, no protocol, no trailing slash
-        ARTIFACTORY_REPO_STAGE = 'docker-local'         // stage / non-main branches
-        ARTIFACTORY_CRED_ID    = 'jfrogcred'
       }
       steps {
         script {
           // For non-main branches, use IMAGE_TAG (aceest-<build#>)
-          String artifactoryTag = env.IMAGE_TAG
+          String dockerHubTag = env.IMAGE_TAG
 
           withCredentials([
             usernamePassword(
-              credentialsId: env.ARTIFACTORY_CRED_ID,
-              usernameVariable: 'ART_USER',
-              passwordVariable: 'ART_PASS'
+              credentialsId: env.DOCKERHUB_CRED_ID,
+              usernameVariable: 'DOCKERHUB_USER',
+              passwordVariable: 'DOCKERHUB_TOKEN'
             )
           ]) {
             sh """
               set -euxo pipefail
 
               LOCAL_IMAGE="\${IMAGE_NAME}:\${IMAGE_TAG}"
-              REMOTE_IMAGE="\${ARTIFACTORY_REGISTRY}/${ARTIFACTORY_REPO_STAGE}/\${IMAGE_NAME}:${artifactoryTag}"
+              REMOTE_IMAGE="\${DOCKERHUB_NAMESPACE}/\${IMAGE_NAME}:${dockerHubTag}"
 
-              # Tag local image with remote registry/repo + chosen tag
+              # Tag local image with Docker Hub namespace + chosen tag
               docker tag "\${LOCAL_IMAGE}" "\${REMOTE_IMAGE}"
 
-              # Login to Artifactory Docker registry (note: no https:// in registry name)
-              echo "\${ART_PASS}" | docker login "\${ARTIFACTORY_REGISTRY}" \\
-                --username "\${ART_USER}" --password-stdin
+              # Login to Docker Hub using a username + access token/password credential.
+              echo "\${DOCKERHUB_TOKEN}" | docker login docker.io \\
+                --username "\${DOCKERHUB_USER}" --password-stdin
 
               # Push image
               docker push "\${REMOTE_IMAGE}"
 
               # (Optional) logout
-              docker logout "\${ARTIFACTORY_REGISTRY}" || true
+              docker logout docker.io || true
             """
           }
         }
@@ -268,20 +268,17 @@ pipeline {
         AZURE_RESOURCE_GROUP = 'rg-aceest'        // TODO: replace with your stage RG
         AZURE_WEBAPP_NAME    = 'aceest-webapp-stage'    // TODO: replace with your stage Web App name
 
-        // Container registry / image - from Artifactory docker-local
-        AZURE_CONTAINER_REGISTRY_SERVER = 'trial5okz6u.jfrog.io'
-        AZURE_CONTAINER_IMAGE_NAME      = 'docker-local/aceest-app' // repo/image path
-        // Always deploy the exact tag we pushed to docker-local for this build
+        // Container registry / image - from Docker Hub
+        AZURE_CONTAINER_REGISTRY_SERVER = 'index.docker.io'
+        AZURE_CONTAINER_IMAGE_NAME      = "${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}" // repo/image path
+        // Always deploy the exact tag we pushed to Docker Hub for this build
         AZURE_CONTAINER_IMAGE_TAG       = "${IMAGE_TAG}"
-
-        // Reuse existing JFrog Docker credentials from Jenkins
-        ARTIFACTORY_CRED_ID = 'jfrogcred'
       }
       steps {
         withCredentials([
           string(credentialsId: env.AZURE_CRED_ID, variable: 'AZURE_SP_JSON'),
           usernamePassword(
-            credentialsId: env.ARTIFACTORY_CRED_ID,
+            credentialsId: env.DOCKERHUB_CRED_ID,
             usernameVariable: 'REG_USER',
             passwordVariable: 'REG_PASS'
           )
@@ -345,19 +342,16 @@ pipeline {
       }
     }
 
-     stage('Docker: Push Image to Artifactory (Prod)') {
+     stage('Docker: Push Image to Docker Hub (Prod)') {
       when {
         expression {
-          // Push to prod repo only for main branch (i.e. MR merged to main)
+          // Push a prod/version tag only for main branch (i.e. MR merged to main)
           return env.BRANCH_NAME == 'main'
         }
       }
       environment {
-        ARTIFACTORY_REGISTRY  = 'trial5okz6u.jfrog.io'
-        ARTIFACTORY_REPO_PROD = 'docker-prod'
-        ARTIFACTORY_CRED_ID   = 'jfrogcred'
         // Optional override: provide a specific prod tag, else semantic v<BUILD_NUMBER>
-        ARTIFACTORY_IMAGE_TAG = ''
+        DOCKERHUB_IMAGE_TAG = ''
       }
       steps {
         script {
@@ -366,34 +360,34 @@ pipeline {
             env.VERSION_TAG = "v${env.BUILD_NUMBER}"
           }
 
-          String requestedTag = env.ARTIFACTORY_IMAGE_TAG?.trim()
-          String artifactoryTag = requestedTag ? requestedTag : env.VERSION_TAG
+          String requestedTag = env.DOCKERHUB_IMAGE_TAG?.trim()
+          String dockerHubTag = requestedTag ? requestedTag : env.VERSION_TAG
 
           withCredentials([
             usernamePassword(
-              credentialsId: env.ARTIFACTORY_CRED_ID,
-              usernameVariable: 'ART_USER',
-              passwordVariable: 'ART_PASS'
+              credentialsId: env.DOCKERHUB_CRED_ID,
+              usernameVariable: 'DOCKERHUB_USER',
+              passwordVariable: 'DOCKERHUB_TOKEN'
             )
           ]) {
             sh """
               set -euxo pipefail
 
               LOCAL_IMAGE="\${IMAGE_NAME}:\${IMAGE_TAG}"
-              REMOTE_IMAGE="\${ARTIFACTORY_REGISTRY}/${ARTIFACTORY_REPO_PROD}/\${IMAGE_NAME}:${artifactoryTag}"
+              REMOTE_IMAGE="\${DOCKERHUB_NAMESPACE}/\${IMAGE_NAME}:${dockerHubTag}"
 
-              # Tag local image with remote registry/repo + chosen tag
+              # Tag local image with Docker Hub namespace + chosen tag
               docker tag "\${LOCAL_IMAGE}" "\${REMOTE_IMAGE}"
 
-              # Login to Artifactory Docker registry (note: no https:// in registry name)
-              echo "\${ART_PASS}" | docker login "\${ARTIFACTORY_REGISTRY}" \\
-                --username "\${ART_USER}" --password-stdin
+              # Login to Docker Hub using a username + access token/password credential.
+              echo "\${DOCKERHUB_TOKEN}" | docker login docker.io \\
+                --username "\${DOCKERHUB_USER}" --password-stdin
 
               # Push image
               docker push "\${REMOTE_IMAGE}"
 
               # (Optional) logout
-              docker logout "\${ARTIFACTORY_REGISTRY}" || true
+              docker logout docker.io || true
             """
           }
         }

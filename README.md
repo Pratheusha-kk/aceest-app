@@ -302,6 +302,10 @@ This repo includes a `Jenkinsfile` that you can use in a Jenkins **Pipeline** jo
 - Docker installed and usable by the Jenkins agent user
 - `curl` available (used for smoke testing endpoints)
 - SonarQube CLI available on PATH as `sonar` (the pipeline prints `sonar --version`)
+- Docker Hub account with a repository named `aceest-app`
+- Jenkins credential `dockerhub-credentials` as **Username with password**:
+  - Username: your Docker Hub username
+  - Password: Docker Hub access token, preferred over account password
 
 ### SonarQube setup (server + secrets)
 
@@ -337,9 +341,43 @@ The pipeline runs `sonar analyze --file sonar-project.properties` and expects th
 - Runs SonarQube static analysis using `sonar-project.properties`
 - Creates a Python venv and runs **PyUnit** tests
 - Builds a Docker image tagged like `aceest-<build_number>`
+- Pushes non-main branch images to Docker Hub as `<dockerhub-user>/aceest-app:aceest-<build_number>`
+- Pushes main branch images to Docker Hub as `<dockerhub-user>/aceest-app:v<build_number>`
 - Runs the container and performs a basic smoke test on:
   - `GET /`
   - `GET /health`
   - `GET /programs`
   - `GET /estimate-calories`
+- Deploys the non-main branch image to Azure Web App by pointing it at the Docker Hub image tag
 - Cleans up the test container and local venv
+
+## Local Jenkins Smoke Flow
+
+For a local-only Jenkins validation with Rancher Desktop, use the provided compose file:
+
+```bash
+export PATH="/Applications/Rancher Desktop.app/Contents/Resources/resources/darwin/bin:$PATH"
+docker compose -f docker-compose.jenkins-local.yml up -d --build
+```
+
+Open Jenkins at `http://localhost:8080`. The helper script `jenkins-local/create-local-job.groovy` creates a job named `aceest-local-flow` from `Jenkinsfile.local`.
+
+The local job validates the core flow without requiring Azure:
+
+- Creates a clean workspace copy
+- Runs a SonarQube/static-analysis stage. In the local image, this archives a fallback `sonar-report.txt` unless the Sonar CLI is installed.
+- Runs Pytest and archives `pytest-report.html`
+- Includes a UI Tests stage. It is present in Blue Ocean and can be enabled with `RUN_UI_TESTS=true` after Chrome/Chromedriver support is available.
+- Builds `aceest-app:local-<build_number>`
+- Runs the image and smoke-tests `/health`, `/`, and `/programs`
+- Optionally pushes to Docker Hub when `PUSH_TO_DOCKERHUB=true` and the `dockerhub-credentials` Jenkins credential exists
+- Loads the image into local Minikube and deploys the rolling-update manifest when `DEPLOY_TO_MINIKUBE=true`
+- Includes an Azure Web App stage guarded by `DEPLOY_TO_AZURE=false` by default
+
+Minikube can be started locally with:
+
+```bash
+export PATH="/Applications/Rancher Desktop.app/Contents/Resources/resources/darwin/bin:$PATH"
+minikube start --driver=docker
+kubectl get nodes
+```
