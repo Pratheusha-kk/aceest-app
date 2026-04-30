@@ -244,6 +244,11 @@ pipeline {
         script {
           // For non-main branches, use IMAGE_TAG (aceest-<build#>)
           String dockerHubTag = env.IMAGE_TAG
+          String dockerHubNamespace = params.DOCKERHUB_NAMESPACE?.trim()
+          if (!dockerHubNamespace) {
+            error('DOCKERHUB_NAMESPACE is required, for example: pratheushakkbits')
+          }
+          String remoteImage = "${dockerHubNamespace}/${env.IMAGE_NAME}:${dockerHubTag}"
 
           withCredentials([
             usernamePassword(
@@ -256,7 +261,7 @@ pipeline {
               set -euxo pipefail
 
               LOCAL_IMAGE="\${IMAGE_NAME}:\${IMAGE_TAG}"
-              REMOTE_IMAGE="\${DOCKERHUB_NAMESPACE}/\${IMAGE_NAME}:${dockerHubTag}"
+              REMOTE_IMAGE="${remoteImage}"
 
               # Tag local image with Docker Hub namespace + chosen tag
               docker tag "\${LOCAL_IMAGE}" "\${REMOTE_IMAGE}"
@@ -293,7 +298,6 @@ pipeline {
 
         // Container registry / image - from Docker Hub
         AZURE_CONTAINER_REGISTRY_SERVER = 'index.docker.io'
-        AZURE_CONTAINER_IMAGE_NAME      = "${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}" // repo/image path
         // Always deploy the exact tag we pushed to Docker Hub for this build
         AZURE_CONTAINER_IMAGE_TAG       = "${IMAGE_TAG}"
       }
@@ -312,6 +316,11 @@ pipeline {
             if (!deployTag) {
               deployTag = env.IMAGE_TAG   // aceest-<BUILD_NUMBER> for stage
             }
+            String dockerHubNamespace = params.DOCKERHUB_NAMESPACE?.trim()
+            if (!dockerHubNamespace) {
+              error('DOCKERHUB_NAMESPACE is required, for example: pratheushakkbits')
+            }
+            String azureContainerImageName = "${dockerHubNamespace}/${env.IMAGE_NAME}"
 
             sh """
               set -euxo pipefail
@@ -336,7 +345,7 @@ pipeline {
               az account set --subscription "\${SUBSCRIPTION}"
 
               # Construct image reference (deployTag injected by Groovy)
-              IMAGE="\${AZURE_CONTAINER_REGISTRY_SERVER}/\${AZURE_CONTAINER_IMAGE_NAME}:${deployTag}"
+              IMAGE="\${AZURE_CONTAINER_REGISTRY_SERVER}/${azureContainerImageName}:${deployTag}"
 
               echo "Deploying image to Azure Stage Web App: \${IMAGE}"
 
@@ -381,6 +390,11 @@ pipeline {
 
           String requestedTag = params.DOCKERHUB_PROD_TAG?.trim()
           String dockerHubTag = requestedTag ? requestedTag : env.VERSION_TAG
+          String dockerHubNamespace = params.DOCKERHUB_NAMESPACE?.trim()
+          if (!dockerHubNamespace) {
+            error('DOCKERHUB_NAMESPACE is required, for example: pratheushakkbits')
+          }
+          String remoteImage = "${dockerHubNamespace}/${env.IMAGE_NAME}:${dockerHubTag}"
 
           withCredentials([
             usernamePassword(
@@ -393,7 +407,7 @@ pipeline {
               set -euxo pipefail
 
               LOCAL_IMAGE="\${IMAGE_NAME}:\${IMAGE_TAG}"
-              REMOTE_IMAGE="\${DOCKERHUB_NAMESPACE}/\${IMAGE_NAME}:${dockerHubTag}"
+              REMOTE_IMAGE="${remoteImage}"
 
               # Tag local image with Docker Hub namespace + chosen tag
               docker tag "\${LOCAL_IMAGE}" "\${REMOTE_IMAGE}"
