@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-app-a
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest-app-ab
+      variant: a
+      strategy: ab-testing
+  template:
+    metadata:
+      labels:
+        app: aceest-app-ab
+        variant: a
+        strategy: ab-testing
+    spec:
+      containers:
+        - name: aceest-app
+          image: aceest-app:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: aceest-config
+          env:
+            - name: APP_VERSION
+              value: experience-a
+            - name: IMAGE_TAG
+              value: experience-a
+            - name: DEPLOYMENT_STRATEGY
+              value: ab-testing
+            - name: RELEASE_COLOR
+              value: blue
+            - name: TRAFFIC_SEGMENT
+              value: group-a
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000

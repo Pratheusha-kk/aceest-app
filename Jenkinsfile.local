@@ -1,0 +1,373 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+  }
+
+  parameters {
+    booleanParam(
+      name: 'RUN_SONAR',
+      defaultValue: true,
+      description: 'Run SonarScanner static analysis. Uses SONAR_HOST_URL/SONAR_TOKEN when supplied; otherwise runs scanner dump mode for local evidence.'
+    )
+    booleanParam(
+      name: 'RUN_UI_TESTS',
+      defaultValue: false,
+      description: 'Run Selenium/Behave UI tests. Enable after Chrome/Chromedriver is available in the Jenkins image.'
+    )
+    booleanParam(
+      name: 'RUN_PYTEST',
+      defaultValue: true,
+      description: 'Run Pytest unit and integration tests. Disable only for deploy-only validation runs.'
+    )
+    booleanParam(
+      name: 'PUSH_TO_DOCKERHUB',
+      defaultValue: false,
+      description: 'Push the locally built image to Docker Hub after smoke tests.'
+    )
+    booleanParam(
+      name: 'DEPLOY_TO_MINIKUBE',
+      defaultValue: true,
+      description: 'Load the image into local Minikube and deploy the rolling-update strategy.'
+    )
+    booleanParam(
+      name: 'ROLLBACK_MINIKUBE',
+      defaultValue: false,
+      description: 'Rollback deployment/aceest-app in local Minikube after the deploy stage. Leave DEPLOY_TO_MINIKUBE=false to run rollback only.'
+    )
+    string(
+      name: 'ROLLBACK_TO_REVISION',
+      defaultValue: '',
+      description: 'Optional Kubernetes rollout revision to roll back to. Leave blank to roll back to the previous revision.'
+    )
+    string(
+      name: 'DOCKERHUB_NAMESPACE',
+      defaultValue: 'pratheushakkbits',
+      description: 'Docker Hub namespace/user that owns the aceest-app repository.'
+    )
+  }
+
+  environment {
+    IMAGE_NAME = 'aceest-app'
+    IMAGE_TAG = "local-${BUILD_NUMBER}"
+    DOCKERHUB_CRED_ID = 'dockerhub-credentials'
+  }
+
+  stages {
+    stage('Checkout / Prepare Workspace') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          rm -rf aceest-app
+          mkdir -p aceest-app
+          tar \
+            --exclude='./.venv' \
+            --exclude='./.venv-ui' \
+            -C /workspace/aceest-app \
+            -cf - . | tar -C aceest-app -xf -
+        '''
+      }
+    }
+
+    stage('SonarQube: Static Analysis') {
+      when {
+        expression { return params.RUN_SONAR }
+      }
+      steps {
+        dir('aceest-app') {
+          sh '''
+            set -euxo pipefail
+
+            sonar-scanner --version | tee sonar-report.txt
+
+            if [ -n "${SONAR_HOST_URL:-}" ]; then
+              for i in $(seq 1 90); do
+                if curl -fsS "${SONAR_HOST_URL}/api/system/status" -o sonar-server-status.json; then
+                  SONAR_STATUS=$(jq -r '.status // empty' sonar-server-status.json)
+                  cat sonar-server-status.json | tee -a sonar-report.txt
+                  if [ "${SONAR_STATUS}" = "UP" ]; then
+                    break
+                  fi
+                fi
+                sleep 5
+                if [ "$i" -eq 90 ]; then
+                  echo "SonarQube did not become ready at ${SONAR_HOST_URL}" | tee -a sonar-report.txt
+                  exit 1
+                fi
+              done
+
+              SCANNER_TOKEN="${SONAR_TOKEN:-}"
+              if [ -z "${SCANNER_TOKEN}" ] && [ -n "${SONAR_ADMIN_USER:-}" ] && [ -n "${SONAR_ADMIN_PASSWORD:-}" ]; then
+                set +x
+                SCANNER_TOKEN=$(curl -fsS \
+                  -u "${SONAR_ADMIN_USER}:${SONAR_ADMIN_PASSWORD}" \
+                  -X POST "${SONAR_HOST_URL}/api/user_tokens/generate" \
+                  -d "name=aceest-local-${JOB_NAME}-${BUILD_NUMBER}" \
+                  | jq -r '.token')
+              fi
+
+              if [ -z "${SCANNER_TOKEN}" ] || [ "${SCANNER_TOKEN}" = "null" ]; then
+                set -x
+                echo "No Sonar token is available. Set SONAR_TOKEN or provide SONAR_ADMIN_USER/SONAR_ADMIN_PASSWORD." | tee -a sonar-report.txt
+                exit 1
+              fi
+
+              {
+                echo
+                echo "sonar.host.url=${SONAR_HOST_URL}"
+                echo "sonar.login=${SCANNER_TOKEN}"
+              } >> sonar-project.properties
+
+              sonar-scanner | tee -a sonar-report.txt
+              set -x
+            else
+              {
+                echo
+                echo "SONAR_HOST_URL/SONAR_TOKEN were not supplied, so this local run uses SonarScanner dump mode."
+                echo "This verifies the real SonarScanner CLI and sonar-project.properties without requiring a SonarQube server."
+              } | tee -a sonar-report.txt
+
+              sonar-scanner \
+                -Dsonar.scanner.dumpToFile=sonar-report.properties \
+                | tee -a sonar-report.txt
+            fi
+
+            python3 scripts/generate_sonar_evidence_report.py \
+              --scanner-log sonar-report.txt \
+              --scanner-properties sonar-report.properties \
+              --output-html sonar-evidence-report.html \
+              --output-json sonar-evidence-report.json
+          '''
+        }
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: 'aceest-app/sonar-report.txt, aceest-app/sonar-report.properties, aceest-app/sonar-evidence-report.html, aceest-app/sonar-evidence-report.json', allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('Python: Unit Tests (PyUnit)') {
+      when {
+        expression { return params.RUN_PYTEST }
+      }
+      steps {
+        dir('aceest-app') {
+          sh '''
+            set -euxo pipefail
+            python3 -m venv .venv
+            . .venv/bin/activate
+            python -m pip install --upgrade pip
+            python -m pip install -r requirements.txt
+            python -m pip install pytest pytest-html
+            export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
+            pytest tests --html=pytest-report.html --self-contained-html
+          '''
+        }
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: 'aceest-app/pytest-report.html', allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('UI Tests') {
+      when {
+        expression { return params.RUN_UI_TESTS }
+      }
+      environment {
+        UI_IMAGE_NAME = "${IMAGE_NAME}:${IMAGE_TAG}"
+        UI_CONTAINER_NAME = "aceest-ui-tests-${BUILD_NUMBER}"
+        UI_BASE_URL = "http://host.docker.internal:5000/gui"
+        UI_HEALTH_URL = "http://host.docker.internal:5000/health"
+      }
+      steps {
+        dir('aceest-app') {
+          sh '''
+            set -euxo pipefail
+            docker build -t "${UI_IMAGE_NAME}" .
+            docker rm -f "${UI_CONTAINER_NAME}" 2>/dev/null || true
+            docker run -d --name "${UI_CONTAINER_NAME}" -p 5000:5000 "${UI_IMAGE_NAME}"
+
+            cleanup() {
+              docker logs "${UI_CONTAINER_NAME}" || true
+              docker rm -f "${UI_CONTAINER_NAME}" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+
+            for i in $(seq 1 30); do
+              if curl -fsS "${UI_HEALTH_URL}" >/dev/null; then
+                break
+              fi
+              sleep 1
+              if [ "$i" -eq 30 ]; then
+                echo "UI test container did not become healthy"
+                exit 1
+              fi
+            done
+
+            python3 -m venv .venv-ui
+            . .venv-ui/bin/activate
+            python -m pip install --upgrade pip
+            python -m pip install -r ui-tests/requirements.txt
+            cd ui-tests
+            mkdir -p reports
+            BASE_URL="${UI_BASE_URL}" python -m behave -f json -o cucumber-report.json -f behave_html_formatter:HTMLFormatter -o reports/ui-tests-report.html
+          '''
+        }
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: 'aceest-app/ui-tests/cucumber-report.json, aceest-app/ui-tests/reports/ui-tests-report.html', allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('Docker: Build Image') {
+      steps {
+        dir('aceest-app') {
+          sh '''
+            set -euxo pipefail
+            docker build -t "${IMAGE_NAME}:${IMAGE_TAG}" .
+            docker image ls "${IMAGE_NAME}:${IMAGE_TAG}"
+          '''
+        }
+      }
+    }
+
+    stage('Docker: Smoke Test Container') {
+      steps {
+        sh '''
+          set -euxo pipefail
+          CID=$(docker run -d -p 5000:5000 "${IMAGE_NAME}:${IMAGE_TAG}")
+
+          cleanup() {
+            docker logs "$CID" || true
+            docker rm -f "$CID" || true
+          }
+          trap cleanup EXIT
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://host.docker.internal:5000/health >/dev/null; then
+              break
+            fi
+            sleep 1
+            if [ "$i" -eq 30 ]; then
+              echo "Health endpoint did not become ready"
+              exit 1
+            fi
+          done
+
+          curl -fsS http://host.docker.internal:5000/ | head -c 200
+          curl -fsS http://host.docker.internal:5000/programs | head -c 200
+        '''
+      }
+    }
+
+    stage('Docker: Push Image to Docker Hub (Stage)') {
+      when {
+        expression { return params.PUSH_TO_DOCKERHUB }
+      }
+      steps {
+        withCredentials([
+          usernamePassword(
+            credentialsId: env.DOCKERHUB_CRED_ID,
+            usernameVariable: 'DOCKERHUB_USER',
+            passwordVariable: 'DOCKERHUB_TOKEN'
+          )
+        ]) {
+          sh '''
+            set -euxo pipefail
+            REMOTE_IMAGE="${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}"
+            docker tag "${IMAGE_NAME}:${IMAGE_TAG}" "${REMOTE_IMAGE}"
+            echo "${DOCKERHUB_TOKEN}" | docker login docker.io --username "${DOCKERHUB_USER}" --password-stdin
+            docker push "${REMOTE_IMAGE}"
+            docker logout docker.io || true
+          '''
+        }
+      }
+    }
+
+    stage('Deploy to Local Minikube') {
+      when {
+        expression { return params.DEPLOY_TO_MINIKUBE }
+      }
+      steps {
+        dir('aceest-app') {
+          sh '''
+            set -euxo pipefail
+            docker save "${IMAGE_NAME}:${IMAGE_TAG}" | docker exec -i minikube docker load
+
+            export KUBECONFIG="${WORKSPACE}/minikube.kubeconfig"
+            cp /host-kube/config "${KUBECONFIG}"
+            sed -i 's#/Users/pratheushakk/.minikube#/host-minikube#g' "${KUBECONFIG}"
+            MINIKUBE_SERVER=$(kubectl config view --kubeconfig "${KUBECONFIG}" -o jsonpath='{.clusters[?(@.name=="minikube")].cluster.server}')
+            MINIKUBE_PORT="${MINIKUBE_SERVER##*:}"
+            kubectl config set-cluster minikube \
+              --kubeconfig "${KUBECONFIG}" \
+              --server="https://host.docker.internal:${MINIKUBE_PORT}" \
+              --insecure-skip-tls-verify=true
+            kubectl config unset clusters.minikube.certificate-authority --kubeconfig "${KUBECONFIG}" || true
+            kubectl config use-context minikube --kubeconfig "${KUBECONFIG}"
+            kubectl get nodes
+
+            kubectl create namespace aceest --dry-run=client -o yaml | kubectl apply -f -
+            kubectl apply -n aceest -f k8s/base/configmap.yaml
+            kubectl apply -n aceest -f k8s/base/service.yaml
+            sed "s#image: aceest-app:latest#image: ${IMAGE_NAME}:${IMAGE_TAG}#" k8s/rolling-update/deployment.yaml | kubectl apply -n aceest -f -
+            kubectl annotate deployment/aceest-app -n aceest kubernetes.io/change-cause="Jenkins ${JOB_NAME} #${BUILD_NUMBER}: ${IMAGE_NAME}:${IMAGE_TAG}" --overwrite
+            kubectl rollout status deployment/aceest-app -n aceest
+            kubectl get deploy,rs,pods,svc -n aceest -o wide
+            kubectl rollout history deployment/aceest-app -n aceest
+          '''
+        }
+      }
+    }
+
+    stage('Rollback Local Minikube (Optional)') {
+      when {
+        expression { return params.ROLLBACK_MINIKUBE }
+      }
+      steps {
+        sh '''
+          set -euxo pipefail
+
+          export KUBECONFIG="${WORKSPACE}/minikube.kubeconfig"
+          cp /host-kube/config "${KUBECONFIG}"
+          sed -i 's#/Users/pratheushakk/.minikube#/host-minikube#g' "${KUBECONFIG}"
+          MINIKUBE_SERVER=$(kubectl config view --kubeconfig "${KUBECONFIG}" -o jsonpath='{.clusters[?(@.name=="minikube")].cluster.server}')
+          MINIKUBE_PORT="${MINIKUBE_SERVER##*:}"
+          kubectl config set-cluster minikube \
+            --kubeconfig "${KUBECONFIG}" \
+            --server="https://host.docker.internal:${MINIKUBE_PORT}" \
+            --insecure-skip-tls-verify=true
+          kubectl config unset clusters.minikube.certificate-authority --kubeconfig "${KUBECONFIG}" || true
+          kubectl config use-context minikube --kubeconfig "${KUBECONFIG}"
+
+          kubectl get deployment aceest-app -n aceest
+          kubectl rollout history deployment/aceest-app -n aceest
+
+          TARGET_REVISION="${ROLLBACK_TO_REVISION:-}"
+          if [ -n "${TARGET_REVISION}" ]; then
+            kubectl rollout undo deployment/aceest-app -n aceest --to-revision="${TARGET_REVISION}"
+          else
+            kubectl rollout undo deployment/aceest-app -n aceest
+          fi
+
+          kubectl rollout status deployment/aceest-app -n aceest
+          kubectl get deploy,rs,pods,svc -n aceest -o wide
+          kubectl rollout history deployment/aceest-app -n aceest
+        '''
+      }
+    }
+
+  }
+
+  post {
+    always {
+      sh 'rm -rf aceest-app || true'
+    }
+  }
+}

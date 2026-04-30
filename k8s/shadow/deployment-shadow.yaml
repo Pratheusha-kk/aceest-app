@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-app-shadow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aceest-app-shadow
+      track: shadow
+      strategy: shadow
+  template:
+    metadata:
+      labels:
+        app: aceest-app-shadow
+        track: shadow
+        strategy: shadow
+    spec:
+      containers:
+        - name: aceest-app
+          image: aceest-app:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: aceest-config
+          env:
+            - name: APP_VERSION
+              value: shadow-copy
+            - name: IMAGE_TAG
+              value: shadow-copy
+            - name: DEPLOYMENT_STRATEGY
+              value: shadow
+            - name: RELEASE_COLOR
+              value: shadow
+            - name: TRAFFIC_SEGMENT
+              value: mirrored
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000

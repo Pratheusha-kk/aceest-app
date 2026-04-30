@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.pytest_cache
+__pycache__
+tests
+ui-tests
+docs
+k8s
+versions
+*.pyc
+*.pyo
+*.pyd
+*.db
+pytest-report.xml
+sonar-report.json

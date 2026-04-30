@@ -302,6 +302,10 @@ This repo includes a `Jenkinsfile` that you can use in a Jenkins **Pipeline** jo
 - Docker installed and usable by the Jenkins agent user
 - `curl` available (used for smoke testing endpoints)
 - SonarQube CLI available on PATH as `sonar` (the pipeline prints `sonar --version`)
+- Docker Hub account with a repository named `aceest-app`
+- Jenkins credential `dockerhub-credentials` as **Username with password**:
+  - Username: your Docker Hub username
+  - Password: Docker Hub access token, preferred over account password
 
 ### SonarQube setup (server + secrets)
 
@@ -337,9 +341,85 @@ The pipeline runs `sonar analyze --file sonar-project.properties` and expects th
 - Runs SonarQube static analysis using `sonar-project.properties`
 - Creates a Python venv and runs **PyUnit** tests
 - Builds a Docker image tagged like `aceest-<build_number>`
+- Pushes non-main branch images to Docker Hub as `<dockerhub-user>/aceest-app:aceest-<build_number>`
+- Pushes main branch images to Docker Hub as `<dockerhub-user>/aceest-app:v<build_number>`
 - Runs the container and performs a basic smoke test on:
   - `GET /`
   - `GET /health`
   - `GET /programs`
   - `GET /estimate-calories`
+- Deploys the non-main branch image to Azure Web App by pointing it at the Docker Hub image tag
 - Cleans up the test container and local venv
+
+## Local Jenkins Smoke Flow
+
+For a local-only Jenkins validation with Rancher Desktop, use the provided compose file:
+
+```bash
+export PATH="/Applications/Rancher Desktop.app/Contents/Resources/resources/darwin/bin:$PATH"
+docker compose -f docker-compose.jenkins-local.yml up -d --build
+```
+
+Open Jenkins at `http://localhost:8080`. The helper script `jenkins-local/create-local-job.groovy` creates a job named `aceest-local-flow` from `Jenkinsfile.local`.
+
+The local job validates the core flow without requiring Azure:
+
+- Creates a clean workspace copy
+- Runs a SonarScanner static-analysis stage. Without `SONAR_HOST_URL`/`SONAR_TOKEN`, the local image runs SonarScanner dump mode and archives scanner evidence, including `sonar-evidence-report.html` and `sonar-evidence-report.json`.
+- Runs Pytest and archives `pytest-report.html`
+- Includes a UI Tests stage. It is present in Blue Ocean and can be enabled with `RUN_UI_TESTS=true`; the local Jenkins image includes Chromium and Chromedriver.
+- Builds `aceest-app:local-<build_number>`
+- Runs the image and smoke-tests `/health`, `/`, and `/programs`
+- Optionally pushes to Docker Hub when `PUSH_TO_DOCKERHUB=true` and the `dockerhub-credentials` Jenkins credential exists
+- Loads the image into local Minikube and deploys the rolling-update manifest when `DEPLOY_TO_MINIKUBE=true`
+- Includes an optional Minikube rollback stage when `ROLLBACK_MINIKUBE=true`
+- Includes an Azure Web App stage guarded by `DEPLOY_TO_AZURE=false` by default
+
+Minikube can be started locally with:
+
+```bash
+export PATH="/Applications/Rancher Desktop.app/Contents/Resources/resources/darwin/bin:$PATH"
+minikube start --driver=docker
+kubectl get nodes
+```
+
+### Local Minikube rollback
+
+The local Jenkins job has a visible `Rollback Local Minikube (Optional)` stage for assignment rollback evidence. It uses Kubernetes rollout history for `deployment/aceest-app` in the `aceest` namespace.
+
+Run a normal deployment with rollback disabled:
+
+```text
+DEPLOY_TO_MINIKUBE=true
+ROLLBACK_MINIKUBE=false
+```
+
+Rollback to the previous revision:
+
+```text
+DEPLOY_TO_MINIKUBE=false
+ROLLBACK_MINIKUBE=true
+ROLLBACK_TO_REVISION=
+```
+
+Rollback to a specific revision:
+
+```text
+DEPLOY_TO_MINIKUBE=false
+ROLLBACK_MINIKUBE=true
+ROLLBACK_TO_REVISION=<revision-number>
+```
+
+To demonstrate deploy and rollback in one Blue Ocean run, set both `DEPLOY_TO_MINIKUBE=true` and `ROLLBACK_MINIKUBE=true`. To capture rollback-only evidence, keep `DEPLOY_TO_MINIKUBE=false`. Kubernetes needs at least two preserved rollout revisions before it can roll back. Check available revisions with:
+
+```bash
+kubectl rollout history deployment/aceest-app -n aceest
+```
+
+Example rollback-only Jenkins trigger:
+
+```bash
+CRUMB=$(curl -sS -c /tmp/jenkins-cookies.txt http://localhost:8080/crumbIssuer/api/json | sed -E 's/.*"crumb":"([^"]+)".*/\1/')
+curl -sS -i -b /tmp/jenkins-cookies.txt -H "Jenkins-Crumb: $CRUMB" \
+  -X POST "http://localhost:8080/job/aceest-local-flow/buildWithParameters?RUN_SONAR=false&RUN_UI_TESTS=false&PUSH_TO_DOCKERHUB=false&DEPLOY_TO_MINIKUBE=false&ROLLBACK_MINIKUBE=true&ROLLBACK_TO_REVISION=&DEPLOY_TO_AZURE=false&DOCKERHUB_NAMESPACE=pratheushakk"
+```
