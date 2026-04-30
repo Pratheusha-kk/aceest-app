@@ -372,6 +372,7 @@ The local job validates the core flow without requiring Azure:
 - Runs the image and smoke-tests `/health`, `/`, and `/programs`
 - Optionally pushes to Docker Hub when `PUSH_TO_DOCKERHUB=true` and the `dockerhub-credentials` Jenkins credential exists
 - Loads the image into local Minikube and deploys the rolling-update manifest when `DEPLOY_TO_MINIKUBE=true`
+- Includes an optional Minikube rollback stage when `ROLLBACK_MINIKUBE=true`
 - Includes an Azure Web App stage guarded by `DEPLOY_TO_AZURE=false` by default
 
 Minikube can be started locally with:
@@ -380,4 +381,45 @@ Minikube can be started locally with:
 export PATH="/Applications/Rancher Desktop.app/Contents/Resources/resources/darwin/bin:$PATH"
 minikube start --driver=docker
 kubectl get nodes
+```
+
+### Local Minikube rollback
+
+The local Jenkins job has a visible `Rollback Local Minikube (Optional)` stage for assignment rollback evidence. It uses Kubernetes rollout history for `deployment/aceest-app` in the `aceest` namespace.
+
+Run a normal deployment with rollback disabled:
+
+```text
+DEPLOY_TO_MINIKUBE=true
+ROLLBACK_MINIKUBE=false
+```
+
+Rollback to the previous revision:
+
+```text
+DEPLOY_TO_MINIKUBE=false
+ROLLBACK_MINIKUBE=true
+ROLLBACK_TO_REVISION=
+```
+
+Rollback to a specific revision:
+
+```text
+DEPLOY_TO_MINIKUBE=false
+ROLLBACK_MINIKUBE=true
+ROLLBACK_TO_REVISION=<revision-number>
+```
+
+To demonstrate deploy and rollback in one Blue Ocean run, set both `DEPLOY_TO_MINIKUBE=true` and `ROLLBACK_MINIKUBE=true`. To capture rollback-only evidence, keep `DEPLOY_TO_MINIKUBE=false`. Kubernetes needs at least two preserved rollout revisions before it can roll back. Check available revisions with:
+
+```bash
+kubectl rollout history deployment/aceest-app -n aceest
+```
+
+Example rollback-only Jenkins trigger:
+
+```bash
+CRUMB=$(curl -sS -c /tmp/jenkins-cookies.txt http://localhost:8080/crumbIssuer/api/json | sed -E 's/.*"crumb":"([^"]+)".*/\1/')
+curl -sS -i -b /tmp/jenkins-cookies.txt -H "Jenkins-Crumb: $CRUMB" \
+  -X POST "http://localhost:8080/job/aceest-local-flow/buildWithParameters?RUN_SONAR=false&RUN_UI_TESTS=false&PUSH_TO_DOCKERHUB=false&DEPLOY_TO_MINIKUBE=false&ROLLBACK_MINIKUBE=true&ROLLBACK_TO_REVISION=&DEPLOY_TO_AZURE=false&DOCKERHUB_NAMESPACE=pratheushakk"
 ```

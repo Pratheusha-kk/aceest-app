@@ -1,0 +1,22 @@
+services:
+  jenkins:
+    build:
+      context: .
+      dockerfile: jenkins-local/Dockerfile
+    container_name: aceest-local-jenkins
+    user: root
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    environment:
+      JAVA_OPTS: "-Djenkins.install.runSetupWizard=false"
+      JENKINS_OPTS: "--httpPort=8080"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - .:/workspace/aceest-app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /Users/pratheushakk/.kube:/host-kube:ro
+      - /Users/pratheushakk/.minikube:/host-minikube:ro
+
+volumes:
+  jenkins_home:
