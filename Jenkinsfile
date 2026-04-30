@@ -5,14 +5,37 @@ pipeline {
     timestamps()
   }
 
+  parameters {
+    booleanParam(
+      name: 'PUSH_TO_DOCKERHUB',
+      defaultValue: true,
+      description: 'Push the tested image to Docker Hub. Requires the Docker Hub credential configured below.'
+    )
+    booleanParam(
+      name: 'DEPLOY_TO_AZURE',
+      defaultValue: false,
+      description: 'Optional Azure Web App deploy. Keep false unless Azure credentials/resources are configured.'
+    )
+    string(
+      name: 'DOCKERHUB_NAMESPACE',
+      defaultValue: 'pratheushakkbits',
+      description: 'Docker Hub namespace/user that owns the aceest-app repository.'
+    )
+    string(
+      name: 'DOCKERHUB_CRED_ID',
+      defaultValue: 'dockerhub-credentials',
+      description: 'Jenkins credential ID for Docker Hub. Type: Username with password.'
+    )
+    string(
+      name: 'DOCKERHUB_PROD_TAG',
+      defaultValue: '',
+      description: 'Optional prod tag for main branch builds. Leave blank to use v<build_number>.'
+    )
+  }
+
   environment {
     IMAGE_NAME = "aceest-app"
     IMAGE_TAG  = "aceest-${BUILD_NUMBER}"
-
-    // Docker Hub namespace/user that owns the target repository.
-    // Example: if your image is docker.io/pratheushakk/aceest-app, use "pratheushakk".
-    DOCKERHUB_NAMESPACE = "pratheushakk"
-    DOCKERHUB_CRED_ID   = "dockerhub-credentials"
 
     // Semantic version for main branch deployments, e.g. v1, v2, ...
     VERSION_TAG = ""
@@ -214,7 +237,7 @@ pipeline {
       when {
         expression {
           // Push a stage/build tag for all non-main branches
-          return env.BRANCH_NAME != 'main'
+          return params.PUSH_TO_DOCKERHUB && env.BRANCH_NAME != 'main'
         }
       }
       steps {
@@ -224,7 +247,7 @@ pipeline {
 
           withCredentials([
             usernamePassword(
-              credentialsId: env.DOCKERHUB_CRED_ID,
+              credentialsId: params.DOCKERHUB_CRED_ID,
               usernameVariable: 'DOCKERHUB_USER',
               passwordVariable: 'DOCKERHUB_TOKEN'
             )
@@ -257,7 +280,7 @@ pipeline {
       when {
         expression {
           // Deploy to stage when the branch is NOT main (e.g. feature branches / PR builds)
-          return env.BRANCH_NAME != 'main'
+          return params.DEPLOY_TO_AZURE && env.BRANCH_NAME != 'main'
         }
       }
       environment {
@@ -278,7 +301,7 @@ pipeline {
         withCredentials([
           string(credentialsId: env.AZURE_CRED_ID, variable: 'AZURE_SP_JSON'),
           usernamePassword(
-            credentialsId: env.DOCKERHUB_CRED_ID,
+            credentialsId: params.DOCKERHUB_CRED_ID,
             usernameVariable: 'REG_USER',
             passwordVariable: 'REG_PASS'
           )
@@ -346,12 +369,8 @@ pipeline {
       when {
         expression {
           // Push a prod/version tag only for main branch (i.e. MR merged to main)
-          return env.BRANCH_NAME == 'main'
+          return params.PUSH_TO_DOCKERHUB && env.BRANCH_NAME == 'main'
         }
-      }
-      environment {
-        // Optional override: provide a specific prod tag, else semantic v<BUILD_NUMBER>
-        DOCKERHUB_IMAGE_TAG = ''
       }
       steps {
         script {
@@ -360,12 +379,12 @@ pipeline {
             env.VERSION_TAG = "v${env.BUILD_NUMBER}"
           }
 
-          String requestedTag = env.DOCKERHUB_IMAGE_TAG?.trim()
+          String requestedTag = params.DOCKERHUB_PROD_TAG?.trim()
           String dockerHubTag = requestedTag ? requestedTag : env.VERSION_TAG
 
           withCredentials([
             usernamePassword(
-              credentialsId: env.DOCKERHUB_CRED_ID,
+              credentialsId: params.DOCKERHUB_CRED_ID,
               usernameVariable: 'DOCKERHUB_USER',
               passwordVariable: 'DOCKERHUB_TOKEN'
             )

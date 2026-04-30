@@ -13,10 +13,11 @@ RUN apt-get update \
       curl \
       docker-cli \
       docker.io \
-      git \
-      jq \
-      kubernetes-client \
-      python3 \
+	      git \
+	      jq \
+	      kubernetes-client \
+	      nodejs \
+	      python3 \
       python3-pip \
       python3-venv \
       unzip \

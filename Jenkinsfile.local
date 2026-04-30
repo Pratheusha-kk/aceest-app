@@ -55,8 +55,6 @@ pipeline {
     AZURE_CRED_ID = 'azure-sp-credentials'
     AZURE_RESOURCE_GROUP = 'rg-aceest'
     AZURE_WEBAPP_NAME = 'aceest-webapp-stage'
-    SONAR_HOST_URL = ''
-    SONAR_TOKEN = ''
   }
 
   stages {
@@ -82,11 +80,43 @@ pipeline {
 
             sonar-scanner --version | tee sonar-report.txt
 
-            if [ -n "${SONAR_HOST_URL:-}" ] && [ -n "${SONAR_TOKEN:-}" ]; then
+            if [ -n "${SONAR_HOST_URL:-}" ]; then
+              for i in $(seq 1 90); do
+                if curl -fsS "${SONAR_HOST_URL}/api/system/status" -o sonar-server-status.json; then
+                  SONAR_STATUS=$(jq -r '.status // empty' sonar-server-status.json)
+                  cat sonar-server-status.json | tee -a sonar-report.txt
+                  if [ "${SONAR_STATUS}" = "UP" ]; then
+                    break
+                  fi
+                fi
+                sleep 5
+                if [ "$i" -eq 90 ]; then
+                  echo "SonarQube did not become ready at ${SONAR_HOST_URL}" | tee -a sonar-report.txt
+                  exit 1
+                fi
+              done
+
+              SCANNER_TOKEN="${SONAR_TOKEN:-}"
+              if [ -z "${SCANNER_TOKEN}" ] && [ -n "${SONAR_ADMIN_USER:-}" ] && [ -n "${SONAR_ADMIN_PASSWORD:-}" ]; then
+                set +x
+                SCANNER_TOKEN=$(curl -fsS \
+                  -u "${SONAR_ADMIN_USER}:${SONAR_ADMIN_PASSWORD}" \
+                  -X POST "${SONAR_HOST_URL}/api/user_tokens/generate" \
+                  -d "name=aceest-local-${JOB_NAME}-${BUILD_NUMBER}" \
+                  | jq -r '.token')
+              fi
+
+              if [ -z "${SCANNER_TOKEN}" ] || [ "${SCANNER_TOKEN}" = "null" ]; then
+                set -x
+                echo "No Sonar token is available. Set SONAR_TOKEN or provide SONAR_ADMIN_USER/SONAR_ADMIN_PASSWORD." | tee -a sonar-report.txt
+                exit 1
+              fi
+
               sonar-scanner \
                 -Dsonar.host.url="${SONAR_HOST_URL}" \
-                -Dsonar.token="${SONAR_TOKEN}" \
+                -Dsonar.login="${SCANNER_TOKEN}" \
                 | tee -a sonar-report.txt
+              set -x
             else
               {
                 echo
