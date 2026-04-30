@@ -31,6 +31,26 @@ pipeline {
       defaultValue: '',
       description: 'Optional prod tag for main branch builds. Leave blank to use v<build_number>.'
     )
+    string(
+      name: 'AZURE_CRED_ID',
+      defaultValue: 'azure-sp-credentials',
+      description: 'Jenkins secret-text credential ID containing Azure service-principal JSON.'
+    )
+    string(
+      name: 'AZURE_RESOURCE_GROUP',
+      defaultValue: 'rg-aceest',
+      description: 'Existing Azure resource group containing the Linux Web App.'
+    )
+    string(
+      name: 'AZURE_WEBAPP_NAME',
+      defaultValue: 'aceest-webapp-stage',
+      description: 'Existing Azure App Service Web App name to deploy the Docker Hub image to.'
+    )
+    string(
+      name: 'AZURE_CONTAINER_PORT',
+      defaultValue: '5000',
+      description: 'Port exposed by the container. The Flask app listens on 5000.'
+    )
   }
 
   environment {
@@ -289,21 +309,13 @@ pipeline {
         }
       }
       environment {
-        // Jenkins credentials: secret text containing SP JSON (tenant, appId, password, subscription)
-        AZURE_CRED_ID = 'azure-sp-credentials'
-
-        // Azure resource details for STAGING
-        AZURE_RESOURCE_GROUP = 'rg-aceest'        // TODO: replace with your stage RG
-        AZURE_WEBAPP_NAME    = 'aceest-webapp-stage'    // TODO: replace with your stage Web App name
-
-        // Container registry / image - from Docker Hub
         AZURE_CONTAINER_REGISTRY_SERVER = 'index.docker.io'
         // Always deploy the exact tag we pushed to Docker Hub for this build
         AZURE_CONTAINER_IMAGE_TAG       = "${IMAGE_TAG}"
       }
       steps {
         withCredentials([
-          string(credentialsId: env.AZURE_CRED_ID, variable: 'AZURE_SP_JSON'),
+          string(credentialsId: params.AZURE_CRED_ID, variable: 'AZURE_SP_JSON'),
           usernamePassword(
             credentialsId: params.DOCKERHUB_CRED_ID,
             usernameVariable: 'REG_USER',
@@ -321,9 +333,25 @@ pipeline {
               error('DOCKERHUB_NAMESPACE is required, for example: pratheushakkbits')
             }
             String azureContainerImageName = "${dockerHubNamespace}/${env.IMAGE_NAME}"
+            String azureResourceGroup = params.AZURE_RESOURCE_GROUP?.trim()
+            String azureWebAppName = params.AZURE_WEBAPP_NAME?.trim()
+            String azureContainerPort = params.AZURE_CONTAINER_PORT?.trim()
+            if (!azureResourceGroup || !azureWebAppName || !azureContainerPort) {
+              error('AZURE_RESOURCE_GROUP, AZURE_WEBAPP_NAME, and AZURE_CONTAINER_PORT are required for Azure deploy.')
+            }
 
             sh """
               set -euxo pipefail
+
+              if [ "\${PUSH_TO_DOCKERHUB}" != "true" ]; then
+                echo "DEPLOY_TO_AZURE requires PUSH_TO_DOCKERHUB=true so Azure can pull the image."
+                exit 1
+              fi
+
+              if ! command -v az >/dev/null 2>&1; then
+                echo "Azure CLI is not installed on this Jenkins agent."
+                exit 1
+              fi
 
               # Write SP JSON to a temp file
               SP_FILE=\$(mktemp)
@@ -345,27 +373,33 @@ pipeline {
               az account set --subscription "\${SUBSCRIPTION}"
 
               # Construct image reference (deployTag injected by Groovy)
-              IMAGE="\${AZURE_CONTAINER_REGISTRY_SERVER}/${azureContainerImageName}:${deployTag}"
+              IMAGE="${azureContainerImageName}:${deployTag}"
 
               echo "Deploying image to Azure Stage Web App: \${IMAGE}"
 
-              # Configure Stage Web App to use this container image and private registry credentials
+              az webapp show \\
+                --resource-group "${azureResourceGroup}" \\
+                --name "${azureWebAppName}" \\
+                --query defaultHostName \\
+                --output tsv
+
+              # Configure Stage Web App to use this Docker Hub image and private registry credentials.
               az webapp config container set \\
-                --resource-group "${AZURE_RESOURCE_GROUP}" \\
-                --name "${AZURE_WEBAPP_NAME}" \\
-                --docker-custom-image-name "\${IMAGE}" \\
-                --docker-registry-server-url "https://\${AZURE_CONTAINER_REGISTRY_SERVER}" \\
-                --docker-registry-server-user "\${REG_USER}" \\
-                --docker-registry-server-password "\${REG_PASS}"
+                --resource-group "${azureResourceGroup}" \\
+                --name "${azureWebAppName}" \\
+                --container-image-name "\${IMAGE}" \\
+                --container-registry-url "https://\${AZURE_CONTAINER_REGISTRY_SERVER}" \\
+                --container-registry-user "\${REG_USER}" \\
+                --container-registry-password "\${REG_PASS}"
 
               # Configure app settings for container startup (port, timeout, etc.)
               az webapp config appsettings set \\
-                --resource-group "${AZURE_RESOURCE_GROUP}" \\
-                --name "${AZURE_WEBAPP_NAME}" \\
-                --settings WEBSITES_PORT=5000 WEBSITES_CONTAINER_START_TIME_LIMIT=1000
+                --resource-group "${azureResourceGroup}" \\
+                --name "${azureWebAppName}" \\
+                --settings WEBSITES_PORT="${azureContainerPort}" WEBSITES_CONTAINER_START_TIME_LIMIT=1000
 
               # Restart the Web App to ensure new image is pulled and settings applied
-              az webapp restart --resource-group "${AZURE_RESOURCE_GROUP}" --name "${AZURE_WEBAPP_NAME}"
+              az webapp restart --resource-group "${azureResourceGroup}" --name "${azureWebAppName}"
 
               rm -f "\${SP_FILE}"
             """

@@ -17,6 +17,11 @@ pipeline {
       description: 'Run Selenium/Behave UI tests. Enable after Chrome/Chromedriver is available in the Jenkins image.'
     )
     booleanParam(
+      name: 'RUN_PYTEST',
+      defaultValue: true,
+      description: 'Run Pytest unit and integration tests. Disable only for deploy-only validation runs.'
+    )
+    booleanParam(
       name: 'PUSH_TO_DOCKERHUB',
       defaultValue: false,
       description: 'Push the locally built image to Docker Hub after smoke tests.'
@@ -36,14 +41,9 @@ pipeline {
       defaultValue: '',
       description: 'Optional Kubernetes rollout revision to roll back to. Leave blank to roll back to the previous revision.'
     )
-    booleanParam(
-      name: 'DEPLOY_TO_AZURE',
-      defaultValue: false,
-      description: 'Optional cloud deploy. Keep false unless Azure credentials and a free-safe plan are configured.'
-    )
     string(
       name: 'DOCKERHUB_NAMESPACE',
-      defaultValue: 'pratheushakk',
+      defaultValue: 'pratheushakkbits',
       description: 'Docker Hub namespace/user that owns the aceest-app repository.'
     )
   }
@@ -52,9 +52,6 @@ pipeline {
     IMAGE_NAME = 'aceest-app'
     IMAGE_TAG = "local-${BUILD_NUMBER}"
     DOCKERHUB_CRED_ID = 'dockerhub-credentials'
-    AZURE_CRED_ID = 'azure-sp-credentials'
-    AZURE_RESOURCE_GROUP = 'rg-aceest'
-    AZURE_WEBAPP_NAME = 'aceest-webapp-stage'
   }
 
   stages {
@@ -63,8 +60,12 @@ pipeline {
         sh '''
           set -euxo pipefail
           rm -rf aceest-app
-          cp -R /workspace/aceest-app aceest-app
-          rm -rf aceest-app/.venv aceest-app/.venv-ui
+          mkdir -p aceest-app
+          tar \
+            --exclude='./.venv' \
+            --exclude='./.venv-ui' \
+            -C /workspace/aceest-app \
+            -cf - . | tar -C aceest-app -xf -
         '''
       }
     }
@@ -112,10 +113,13 @@ pipeline {
                 exit 1
               fi
 
-              sonar-scanner \
-                -Dsonar.host.url="${SONAR_HOST_URL}" \
-                -Dsonar.login="${SCANNER_TOKEN}" \
-                | tee -a sonar-report.txt
+              {
+                echo
+                echo "sonar.host.url=${SONAR_HOST_URL}"
+                echo "sonar.login=${SCANNER_TOKEN}"
+              } >> sonar-project.properties
+
+              sonar-scanner | tee -a sonar-report.txt
               set -x
             else
               {
@@ -145,6 +149,9 @@ pipeline {
     }
 
     stage('Python: Unit Tests (PyUnit)') {
+      when {
+        expression { return params.RUN_PYTEST }
+      }
       steps {
         dir('aceest-app') {
           sh '''
@@ -356,58 +363,6 @@ pipeline {
       }
     }
 
-    stage('Deploy to Azure Web App (Optional)') {
-      when {
-        expression { return params.DEPLOY_TO_AZURE }
-      }
-      steps {
-        withCredentials([
-          string(credentialsId: env.AZURE_CRED_ID, variable: 'AZURE_SP_JSON'),
-          usernamePassword(
-            credentialsId: env.DOCKERHUB_CRED_ID,
-            usernameVariable: 'REG_USER',
-            passwordVariable: 'REG_PASS'
-          )
-        ]) {
-          sh '''
-            set -euxo pipefail
-            if ! command -v az >/dev/null 2>&1; then
-              echo "Azure CLI is not installed in this local Jenkins image. Install az before enabling DEPLOY_TO_AZURE."
-              exit 1
-            fi
-            if [ "${PUSH_TO_DOCKERHUB}" != "true" ]; then
-              echo "DEPLOY_TO_AZURE requires PUSH_TO_DOCKERHUB=true so Azure can pull the image."
-              exit 1
-            fi
-
-            SP_FILE=$(mktemp)
-            echo "${AZURE_SP_JSON}" > "${SP_FILE}"
-            TENANT=$(jq -r '.tenant // .tenantId' "${SP_FILE}")
-            APPID=$(jq -r '.appId // .clientId' "${SP_FILE}")
-            PASSWORD=$(jq -r '.password // .clientSecret' "${SP_FILE}")
-            SUBSCRIPTION=$(jq -r '.subscription // .subscriptionId' "${SP_FILE}")
-
-            az login --service-principal --username "${APPID}" --password "${PASSWORD}" --tenant "${TENANT}"
-            az account set --subscription "${SUBSCRIPTION}"
-
-            IMAGE="index.docker.io/${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}"
-            az webapp config container set \
-              --resource-group "${AZURE_RESOURCE_GROUP}" \
-              --name "${AZURE_WEBAPP_NAME}" \
-              --docker-custom-image-name "${IMAGE}" \
-              --docker-registry-server-url "https://index.docker.io" \
-              --docker-registry-server-user "${REG_USER}" \
-              --docker-registry-server-password "${REG_PASS}"
-            az webapp config appsettings set \
-              --resource-group "${AZURE_RESOURCE_GROUP}" \
-              --name "${AZURE_WEBAPP_NAME}" \
-              --settings WEBSITES_PORT=5000 WEBSITES_CONTAINER_START_TIME_LIMIT=1000
-            az webapp restart --resource-group "${AZURE_RESOURCE_GROUP}" --name "${AZURE_WEBAPP_NAME}"
-            rm -f "${SP_FILE}"
-          '''
-        }
-      }
-    }
   }
 
   post {
