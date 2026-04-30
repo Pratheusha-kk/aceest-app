@@ -9,7 +9,7 @@ pipeline {
     booleanParam(
       name: 'RUN_SONAR',
       defaultValue: true,
-      description: 'Run local static analysis stage. Uses sonar when available; otherwise produces an archived local analysis report.'
+      description: 'Run SonarScanner static analysis. Uses SONAR_HOST_URL/SONAR_TOKEN when supplied; otherwise runs scanner dump mode for local evidence.'
     )
     booleanParam(
       name: 'RUN_UI_TESTS',
@@ -55,6 +55,8 @@ pipeline {
     AZURE_CRED_ID = 'azure-sp-credentials'
     AZURE_RESOURCE_GROUP = 'rg-aceest'
     AZURE_WEBAPP_NAME = 'aceest-webapp-stage'
+    SONAR_HOST_URL = ''
+    SONAR_TOKEN = ''
   }
 
   stages {
@@ -77,25 +79,37 @@ pipeline {
         dir('aceest-app') {
           sh '''
             set -euxo pipefail
-            if command -v sonar >/dev/null 2>&1; then
-              sonar --version
-              sonar plugins list || sonar install secrets
-              sonar analyze --file sonar-project.properties | tee sonar-report.txt
+
+            sonar-scanner --version | tee sonar-report.txt
+
+            if [ -n "${SONAR_HOST_URL:-}" ] && [ -n "${SONAR_TOKEN:-}" ]; then
+              sonar-scanner \
+                -Dsonar.host.url="${SONAR_HOST_URL}" \
+                -Dsonar.token="${SONAR_TOKEN}" \
+                | tee -a sonar-report.txt
             else
               {
-                echo "Local Sonar CLI is not installed in this Jenkins image."
-                echo "Static analysis fallback for local validation:"
-                echo "- sonar-project.properties is present: $(test -f sonar-project.properties && echo yes || echo no)"
-                echo "- Python files:"
-                find . -name '*.py' -not -path './.venv/*' -not -path './.venv-ui/*' | sort
-              } | tee sonar-report.txt
+                echo
+                echo "SONAR_HOST_URL/SONAR_TOKEN were not supplied, so this local run uses SonarScanner dump mode."
+                echo "This verifies the real SonarScanner CLI and sonar-project.properties without requiring a SonarQube server."
+              } | tee -a sonar-report.txt
+
+              sonar-scanner \
+                -Dsonar.scanner.dumpToFile=sonar-report.properties \
+                | tee -a sonar-report.txt
             fi
+
+            python3 scripts/generate_sonar_evidence_report.py \
+              --scanner-log sonar-report.txt \
+              --scanner-properties sonar-report.properties \
+              --output-html sonar-evidence-report.html \
+              --output-json sonar-evidence-report.json
           '''
         }
       }
       post {
         always {
-          archiveArtifacts artifacts: 'aceest-app/sonar-report.txt, aceest-app/sonar-report.json', allowEmptyArchive: true
+          archiveArtifacts artifacts: 'aceest-app/sonar-report.txt, aceest-app/sonar-report.properties, aceest-app/sonar-evidence-report.html, aceest-app/sonar-evidence-report.json', allowEmptyArchive: true
         }
       }
     }

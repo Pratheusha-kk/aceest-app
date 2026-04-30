@@ -365,9 +365,9 @@ Open Jenkins at `http://localhost:8080`. The helper script `jenkins-local/create
 The local job validates the core flow without requiring Azure:
 
 - Creates a clean workspace copy
-- Runs a SonarQube/static-analysis stage. In the local image, this archives a fallback `sonar-report.txt` unless the Sonar CLI is installed.
+- Runs a SonarScanner static-analysis stage. Without `SONAR_HOST_URL`/`SONAR_TOKEN`, the local image runs SonarScanner dump mode and archives scanner evidence, including `sonar-evidence-report.html` and `sonar-evidence-report.json`.
 - Runs Pytest and archives `pytest-report.html`
-- Includes a UI Tests stage. It is present in Blue Ocean and can be enabled with `RUN_UI_TESTS=true` after Chrome/Chromedriver support is available.
+- Includes a UI Tests stage. It is present in Blue Ocean and can be enabled with `RUN_UI_TESTS=true`; the local Jenkins image includes Chromium and Chromedriver.
 - Builds `aceest-app:local-<build_number>`
 - Runs the image and smoke-tests `/health`, `/`, and `/programs`
 - Optionally pushes to Docker Hub when `PUSH_TO_DOCKERHUB=true` and the `dockerhub-credentials` Jenkins credential exists
